@@ -426,7 +426,7 @@ Outras garantias cobertas: rollback de produto **e** hold quando uma exceção s
 
 **`docker-compose.yml`** — PostgreSQL com healthcheck + API, que só inicia quando o banco está pronto (`condition: service_healthy`). A API sobe com **`WEB_CONCURRENCY: 2`**, deliberadamente: dois processos independentes demonstram que a consistência vem do banco, não de um lock em memória de um único processo. O serviço `tests` fica atrás de um `profile`, para não subir junto com a aplicação.
 
-> Verificado de ponta a ponta: `docker compose up --build` constrói a imagem, o PostgreSQL passa no healthcheck, a API sobe com os dois processos uvicorn e responde em `/health`.
+> `docker compose up --build` foi verificado: a imagem é construída, o PostgreSQL passa no healthcheck, a API sobe com os dois processos uvicorn e responde em `/health`. O estágio `test` teve um defeito encontrado só quando foi construído pela primeira vez (o `requirements-dev.txt` inclui o `requirements.txt`, que não era copiado para aquele estágio) — corrigido, e um lembrete de que um estágio de build que nunca rodou não é um estágio que funciona.
 
 ---
 

@@ -37,10 +37,15 @@ CMD ["uvicorn", "stock.api.app:create_app", "--factory", "--host", "0.0.0.0", "-
 # ---- testes -----------------------------------------------------------------
 FROM runtime AS test
 USER root
-COPY requirements-dev.txt .
+# Os dois arquivos: requirements-dev.txt começa com "-r requirements.txt",
+# então o pip precisa encontrar o segundo no mesmo diretório.
+COPY requirements.txt requirements-dev.txt ./
 RUN pip install -r requirements-dev.txt
 COPY pyproject.toml .
 COPY tests ./tests
+# o pytest grava .pytest_cache no diretório de trabalho; sem isto o usuário
+# não-root não conseguiria escrever e a execução sairia cheia de avisos
+RUN chown -R app:app /app
 USER app
 CMD ["pytest"]
 
