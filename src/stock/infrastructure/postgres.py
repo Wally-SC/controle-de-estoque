@@ -221,6 +221,12 @@ class _Products:
             raise InvariantViolationError("Produto não encontrado após upsert.", product_id=product_id)
         return product
 
+    def list_all(self, *, limit: int) -> list[Product]:
+        rows = self._uow._execute(
+            "SELECT id, total, reserved, blocked FROM products ORDER BY id LIMIT %s", (limit,)
+        ).fetchall()
+        return [Product.restore(*row) for row in rows]
+
     def save(self, product: Product) -> None:
         self._uow._require_lock(product.id)
         self._uow._execute(

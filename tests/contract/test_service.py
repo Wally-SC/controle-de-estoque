@@ -70,6 +70,32 @@ def test_holds_are_queryable_by_id_with_their_data(service):
     assert got_r.created_at.tzinfo is not None
 
 
+def test_list_products_returns_the_catalog_ordered_by_id(service):
+    assert service.list_products() == []
+
+    service.add_stock("sku-b", 50)
+    service.add_stock("sku-a", 100)
+    service.reserve("sku-a", 30, "order-1")
+    service.block("sku-a", 20, "avaria")
+
+    catalogo = service.list_products()
+    assert [s.product_id for s in catalogo] == ["sku-a", "sku-b"]
+    a = catalogo[0]
+    assert (a.total, a.available, a.reserved, a.blocked) == (100, 50, 30, 20)
+
+
+def test_list_products_respects_the_limit(service):
+    for i in range(5):
+        service.add_stock(f"sku-{i}", 1)
+    assert [s.product_id for s in service.list_products(limit=2)] == ["sku-0", "sku-1"]
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1001, 1.5, "10", None, True])
+def test_list_products_rejects_an_invalid_limit(service, limit):
+    with pytest.raises(InvalidQuantityError):
+        service.list_products(limit=limit)
+
+
 def test_list_holds_returns_active_ones_and_omits_released(service):
     service.add_stock("sku", 100)
     service.add_stock("outro", 50)

@@ -114,6 +114,11 @@ class _Products:
         self._uow._acquire(product_id)
         return self._uow._backend._read_product(product_id) or Product(product_id)
 
+    def list_all(self, *, limit: int) -> list[Product]:
+        with self._uow._backend._state_lock:
+            rows = sorted(self._uow._backend._products.items())[:limit]
+        return [Product.restore(pid, *row) for pid, row in rows]
+
     def save(self, product: Product) -> None:
         self._uow._require_lock(product.id)
         self._uow._pending_products[product.id] = (product.total, product.reserved, product.blocked)

@@ -213,6 +213,10 @@ def create_app(service: StockService | None = None, settings: Settings | None = 
         return HoldOut.from_hold(svc.release_block(block_id))
 
     # -- consultas --------------------------------------------------------- #
+    @app.get("/products", response_model=list[StockOut], tags=["estoque"])
+    def list_products(svc: ServiceDep, limit: int = 200) -> list[StockOut]:
+        return [StockOut.from_snapshot(s) for s in svc.list_products(limit=limit)]
+
     @app.get("/products/{product_id}", response_model=StockOut, tags=["estoque"])
     def get_stock(product_id: str, svc: ServiceDep) -> StockOut:
         return StockOut.from_snapshot(svc.get_stock(product_id))

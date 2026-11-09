@@ -62,6 +62,21 @@ def test_console_page_is_served_at_the_root(client):
     assert "https://" not in r.text.replace("https://127.0.0.1", "")
 
 
+def test_list_products_endpoint(client):
+    assert client.get("/products").json() == []
+
+    client.post("/products/sku-b/entries", json={"quantity": 5})
+    client.post("/products/sku-a/entries", json={"quantity": 10})
+    client.post("/products/sku-a/reservations", json={"quantity": 4, "request_id": "o"})
+
+    catalogo = client.get("/products").json()
+    assert [p["product_id"] for p in catalogo] == ["sku-a", "sku-b"]
+    assert catalogo[0] == {"product_id": "sku-a", "total": 10, "available": 6, "reserved": 4, "blocked": 0}
+
+    assert len(client.get("/products", params={"limit": 1}).json()) == 1
+    assert client.get("/products", params={"limit": 0}).status_code == 422
+
+
 def test_list_holds_endpoint(client):
     client.post("/products/sku/entries", json={"quantity": 50})
     rid = client.post("/products/sku/reservations", json={"quantity": 5, "request_id": "o"}).json()["id"]

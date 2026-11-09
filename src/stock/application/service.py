@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from stock.domain.exceptions import (
     HoldNotFoundError,
+    InvalidQuantityError,
     InvariantViolationError,
     ProductNotFoundError,
 )
@@ -119,6 +120,18 @@ class StockService:
         if product is None:
             raise ProductNotFoundError(pid)
         return product.snapshot()
+
+    def list_products(self, *, limit: int = 200) -> list[StockSnapshot]:
+        """Catálogo dos produtos existentes, por ordem de id.
+
+        Leitura sem lock e com teto: devolve uma fotografia aproximada, já que
+        outras operações podem estar alterando os saldos neste instante. Para
+        decidir algo sobre um produto, use ``get_stock``, que é a leitura dele.
+        """
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise InvalidQuantityError("limit deve ser um inteiro entre 1 e 1000.", received=repr(limit))
+        with self._uow_factory() as uow:
+            return [p.snapshot() for p in uow.products.list_all(limit=limit)]
 
     def list_holds(self, product_id: str, *, only_active: bool = True) -> list[Hold]:
         """Reservas e bloqueios de um produto, mais recentes primeiro."""

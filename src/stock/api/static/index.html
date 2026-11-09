@@ -71,6 +71,34 @@
   }
   button.quiet:hover { background: var(--surface); border-color: var(--ink-soft); }
 
+  .picker button.tall { padding: 8px 14px; }
+
+  /* ---------- catálogo ---------- */
+  .catalog { margin-bottom: 26px; }
+  .catalog table { width: 100%; border-collapse: collapse; }
+  .catalog th {
+    font-size: 12px; font-weight: 500; color: var(--ink-soft); text-align: left;
+    padding: 0 10px 8px 0; border-bottom: 1px solid var(--line);
+  }
+  .catalog th.num, .catalog td.num { text-align: right; }
+  .catalog td { padding: 9px 10px 9px 0; border-bottom: 1px dotted var(--line); font-size: 14px; }
+  .catalog tr:last-child td { border-bottom: 0; }
+  .catalog .name { font-weight: 600; overflow-wrap: anywhere; }
+  .catalog .num.zero { color: var(--ink-soft); }
+  .catalog .mix { display: flex; height: 4px; width: 110px; background: #e4e7e2; }
+  .catalog .mix span { display: block; }
+  .catalog td.act { width: 1%; white-space: nowrap; padding-right: 0; }
+  .catalog tbody tr { cursor: pointer; }
+  .catalog tbody tr:hover td { background: #f6f7f5; }
+  .catalog tbody tr.current td { background: #f0f3ef; }
+  .catalog tbody tr.current .name::after {
+    content: "aberto"; margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--ink-soft);
+  }
+  @media (max-width: 760px) {
+    .catalog .hide-sm { display: none; }
+    .catalog .mix { width: 60px; }
+  }
+
   /* ---------- herói: o estado do estoque ---------- */
   .state { background: var(--surface); border: 1px solid var(--line); padding: 22px 24px 20px; }
 
@@ -162,7 +190,31 @@
       <input id="product" value="sku-1" autocomplete="off" spellcheck="false">
     </div>
     <button type="submit">Abrir</button>
+    <button type="button" class="quiet tall" id="toggle-catalog" aria-expanded="false" aria-controls="catalog">
+      Listar todos
+    </button>
   </form>
+
+  <section class="panel catalog" id="catalog" hidden>
+    <h2>Produtos cadastrados</h2>
+    <div class="body">
+      <table id="catalog-table">
+        <thead>
+          <tr>
+            <th>Produto</th>
+            <th class="num">Total</th>
+            <th class="num">Disponível</th>
+            <th class="num">Reservado</th>
+            <th class="num">Bloqueado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="catalog-rows"></tbody>
+      </table>
+      <p class="placeholder" id="catalog-empty" hidden>Nenhum produto cadastrado. Dê uma entrada para criar o primeiro.</p>
+      <p class="placeholder" id="catalog-capped" hidden>Mostrando os 200 primeiros produtos, por ordem de código.</p>
+    </div>
+  </section>
 
   <section class="state" aria-live="polite">
     <div class="state-head">
@@ -385,12 +437,92 @@
     }
   }
 
+  // ---------- catálogo ---------------------------------------------------
+  function openFromCatalog(productId) {
+    state.product = productId;
+    $("product").value = productId;
+    refresh();
+    document.querySelector(".state").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function paintCatalog(products) {
+    const rows = $("catalog-rows");
+    rows.textContent = "";
+    $("catalog-empty").hidden = products.length > 0;
+    $("catalog-capped").hidden = products.length < 200;
+
+    for (const p of products) {
+      const tr = document.createElement("tr");
+      if (p.product_id === state.product) tr.className = "current";
+
+      const name = document.createElement("td");
+      const label = document.createElement("div");
+      label.className = "name";
+      label.textContent = p.product_id;
+      name.appendChild(label);
+      if (p.total > 0) {
+        const mix = document.createElement("div");
+        mix.className = "mix hide-sm";
+        for (const [key, color] of [["available", "--available"], ["reserved", "--reserved"], ["blocked", "--blocked"]]) {
+          if (p[key] <= 0) continue;
+          const seg = document.createElement("span");
+          seg.style.width = (p[key] / p.total * 100) + "%";
+          seg.style.background = `var(${color})`;
+          mix.appendChild(seg);
+        }
+        name.appendChild(mix);
+      }
+
+      tr.appendChild(name);
+      for (const key of ["total", "available", "reserved", "blocked"]) {
+        const td = document.createElement("td");
+        td.className = "num" + (p[key] === 0 ? " zero" : "");
+        td.textContent = p[key];
+        tr.appendChild(td);
+      }
+
+      const act = document.createElement("td");
+      act.className = "act";
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "quiet";
+      open.textContent = "Abrir";
+      act.appendChild(open);
+      tr.appendChild(act);
+
+      // A linha inteira abre o produto; o botão existe para deixar isso visível.
+      // stopPropagation evita que o clique no botão dispare o handler duas vezes.
+      open.addEventListener("click", (e) => { e.stopPropagation(); openFromCatalog(p.product_id); });
+      tr.addEventListener("click", () => openFromCatalog(p.product_id));
+
+      rows.appendChild(tr);
+    }
+  }
+
+  async function loadCatalog() {
+    const products = await call("GET", "/products", null, "Listar produtos cadastrados");
+    paintCatalog(products || []);
+  }
+
+  function catalogIsOpen() {
+    return !$("catalog").hidden;
+  }
+
+  $("toggle-catalog").addEventListener("click", async () => {
+    const open = !catalogIsOpen();
+    $("catalog").hidden = !open;
+    $("toggle-catalog").setAttribute("aria-expanded", String(open));
+    $("toggle-catalog").textContent = open ? "Ocultar lista" : "Listar todos";
+    if (open) await loadCatalog();
+  });
+
   // ---------- operações --------------------------------------------------
   async function refresh() {
     const p = encodeURIComponent(state.product);
     const stock = await call("GET", `/products/${p}`, null, `Consultar ${state.product}`);
     paint(stock);
     paintHolds(stock ? (await call("GET", `/products/${p}/holds`, null, "Listar reservas e bloqueios")) || [] : []);
+    if (catalogIsOpen()) await loadCatalog();  // a lista acompanha o que acabou de mudar
   }
 
   function quantity(id) {

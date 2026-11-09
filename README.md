@@ -318,6 +318,7 @@ Erros do driver são traduzidos para o vocabulário do domínio na fronteira da 
 | `POST` | `/products/{id}/blocks` | Bloquear | 201 | 404, 409, 422, 503 |
 | `POST` | `/reservations/{id}/release` | Liberar reserva | 200 | 404, 409, 503 |
 | `POST` | `/blocks/{id}/release` | Liberar bloqueio | 200 | 404, 409, 503 |
+| `GET` | `/products` | Catálogo: todos os produtos com seus saldos (`?limit=`, padrão e teto 200) | 200 | 422 |
 | `GET` | `/products/{id}` | Consultar estoque | 200 | 404 |
 | `GET` | `/products/{id}/holds` | Listar reservas e bloqueios (`?only_active=false` inclui os liberados) | 200 | 404 |
 | `GET` | `/reservations/{id}` · `/blocks/{id}` | Consultar hold | 200 | 404 |
@@ -328,7 +329,7 @@ Reservas e bloqueios têm **rotas de liberação distintas** em vez de um `/hold
 
 Os endpoints são funções **síncronas** (`def`, não `async def`): o FastAPI as executa num threadpool limitado, o que combina com o driver síncrono do PostgreSQL e naturalmente limita o número de operações em voo.
 
-A listagem de holds é uma leitura **sem lock**, servida pelo índice `(product_id, status)`, com `LIMIT 200` — um teto defensivo para que um produto com muitas reservas não devolva uma resposta ilimitada.
+As duas listagens são leituras **sem lock** e com teto de 200 registros, para que a resposta nunca seja ilimitada: a de holds é servida pelo índice `(product_id, status)`, e a de produtos sai ordenada por id. Por serem sem lock, devolvem uma fotografia aproximada — outras operações podem estar alterando os saldos naquele instante. Para decidir algo sobre um produto específico, vale a leitura dele (`GET /products/{id}`), e a decisão de verdade acontece dentro da seção crítica do comando.
 
 ---
 
@@ -339,7 +340,11 @@ A raiz (<http://localhost:8000>) serve uma tela para operar o estoque sem precis
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ Controle de Estoque                        Referência da API │
-│ Produto [ sku-1        ] (Abrir)                             │
+│ Produto [ sku-1        ] (Abrir) (Listar todos)              │
+├──────────────────────────────────────────────────────────────┤
+│ Produtos cadastrados      Total  Dispon.  Reserv.  Bloq.     │
+│  sku-1  ▬▬▬▬▭              100      86       14       0  →   │
+│  sku-2  ▬▬▬▬▬              100      60        0      40  →   │
 ├──────────────────────────────────────────────────────────────┤
 │  sku-1                                      em estoque  100  │
 │  ███████████████████████▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒                    │
@@ -361,7 +366,7 @@ Três decisões de desenho, e o motivo de cada uma:
 
 **O registro de atividade mostra o código HTTP de cada chamada.** A tela não esconde a API: expõe o status e traduz o envelope de erro em uma frase direta — um 409 vira "Pedido de 90, mas há 50 disponível(is)", usando o campo `details.available` da resposta. Para quem avalia o case, é a forma mais rápida de confirmar que as regras de consistência estão ativas; para quem opera, é a diferença entre "deu erro" e saber o que fazer.
 
-**Liberar é um botão ao lado do hold, não um campo de id.** Por isso existe o `GET /products/{id}/holds`: sem ele seria preciso anotar manualmente o identificador devolvido na criação — exatamente o atrito que torna o Swagger ruim como interface de uso.
+**Liberar é um botão ao lado do hold, não um campo de id.** Por isso existe o `GET /products/{id}/holds`: sem ele seria preciso anotar manualmente o identificador devolvido na criação — exatamente o atrito que torna o Swagger ruim como interface de uso. Pelo mesmo motivo existe o `GET /products`: **Listar todos** abre o catálogo com o saldo de cada produto, e clicar numa linha a carrega — sem ele seria preciso adivinhar quais produtos existem.
 
 A página é um **único arquivo HTML sem build e sem CDN** (`src/stock/api/static/index.html`), com CSS e JavaScript embutidos. Isso é deliberado: funciona dentro do contêiner sem acesso à internet, não acrescenta nenhuma dependência ao projeto e não cria um segundo processo para subir. Há teste garantindo que a página é servida e que nada nela vem de fora.
 
@@ -369,11 +374,11 @@ A página é um **único arquivo HTML sem build e sem CDN** (`src/stock/api/stat
 
 ## 8. Testes
 
-**163 testes.** Executados contra PostgreSQL 16 real nesta entrega:
+**182 testes.** Executados contra PostgreSQL 16 real nesta entrega:
 
 ```
-163 passed in 16.05s                        # com DATABASE_URL (memória + PostgreSQL)
-129 passed, 34 skipped in 4.28s             # sem DATABASE_URL (integração pulada, não falha)
+182 passed in 18.66s                        # com DATABASE_URL (memória + PostgreSQL)
+139 passed, 43 skipped in 4.35s             # sem DATABASE_URL (integração pulada, não falha)
 ```
 
 | Suíte | O que cobre |
@@ -495,7 +500,7 @@ O enunciado não informa volumetria, então **dimensionei para o pior caso plaus
 2. **Schema criado no startup**, não com migrações versionadas — adequado ao case, inadequado para produção (ver seção 14).
 3. **Operações não são idempotentes.** Um retry de rede após timeout pode criar uma segunda reserva. Mitigação conhecida: chave de idempotência (seção 14).
 4. **Sem expiração de reservas:** uma reserva esquecida imobiliza estoque indefinidamente.
-5. **Listagem de holds sem paginação:** `GET /products/{id}/holds` devolve no máximo 200 registros, sem cursor. Suficiente para operar, insuficiente para um produto com dezenas de milhares de reservas.
+5. **Listagens sem paginação:** `GET /products` e `GET /products/{id}/holds` devolvem no máximo 200 registros, sem cursor, filtro ou busca. Suficiente para operar, insuficiente para um catálogo grande ou um produto com dezenas de milhares de reservas.
 6. **Sem observabilidade estruturada:** há logs, mas não métricas, tracing nem SLO.
 7. **O console não se atualiza sozinho:** a tela reflete o estado da última ação feita nela; não há *polling* nem WebSocket, então duas abas abertas podem divergir até alguém operar. Também não tem autenticação.
 8. **Volumetria não medida** — estimada analiticamente, sem teste de carga.

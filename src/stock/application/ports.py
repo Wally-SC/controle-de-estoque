@@ -27,6 +27,9 @@ class ProductRepository(Protocol):
     def get_or_create_for_update(self, product_id: str) -> Product:
         """Idem, mas cria o produto (zerado) de forma atômica se ainda não existir."""
 
+    def list_all(self, *, limit: int) -> list[Product]:
+        """Catálogo: produtos existentes, por ordem de id (leitura sem lock)."""
+
     def save(self, product: Product) -> None:
         """Persiste o estado. Exige que o lock do produto esteja em posse da UoW."""
 
